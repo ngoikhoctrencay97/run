@@ -1,0 +1,128 @@
+log_dir: ${oc.env:ROOT,.}/logs
+
+training:
+  max_round: 1000000
+  max_stage: 1
+  hf_push_frequency: 10  # Tăng từ 1 để giảm tải I/O
+  num_generations: 1     # Giảm từ 2 để tiết kiệm memory
+  num_transplant_trees: 1 # Giảm từ 2 để tiết kiệm tài nguyên
+  seed: 42
+  fp16: true  # BẬT fp16 để tiết kiệm VRAM trên H100
+
+blockchain:
+  alchemy_url: "https://gensyn-testnet.g.alchemy.com/public"
+  contract_address: ${oc.env:SWARM_CONTRACT,null}
+  org_id: ${oc.env:ORG_ID,null}
+  mainnet_chain_id: 685685
+  modal_proxy_url: "http://localhost:3000/api/"
+
+communications:
+  initial_peers:
+    - '/ip4/38.101.215.12/tcp/30011/p2p/QmQ2gEXoPJg6iMBSUFWGzAabS2VhnzuS782Y637hGjfsRJ'
+    - '/ip4/38.101.215.13/tcp/30012/p2p/QmWhiaLrx3HRZfgXc2i7KW5nMUNK7P9tRc71yFJdGEZKkC'
+    - '/ip4/38.101.215.14/tcp/30013/p2p/QmQa1SCfYTxx7RvU7qJJRo79Zm1RAwPpkeLueDVJuBBmFp'
+
+eval:
+  judge_base_url: https://swarm-judge-102957787771.us-east1.run.app
+
+hydra:
+  run:
+    dir: ${log_dir}
+
+game_manager:
+  *target*: rgym_exp.src.manager.SwarmGameManager
+  max_stage: ${training.max_stage}
+  max_round: ${training.max_round}
+  log_dir: ${log_dir}
+  hf_token: ${oc.env:HUGGINGFACE_ACCESS_TOKEN,null}
+  hf_push_frequency: ${training.hf_push_frequency}
+  run_mode: "train_and_evaluate"
+  bootnodes: ${communications.initial_peers}
+  
+  game_state: 
+    *target*: genrl.state.game_state.GameState
+    round: 0
+    stage: 0
+    
+  reward_manager:
+    *target*: genrl.rewards.DefaultRewardManager
+    reward_fn_store:
+      *target*: genrl.rewards.reward_store.RewardFnStore
+      max_rounds: ${training.max_round}
+      reward_fn_stores:
+        - *target*: genrl.rewards.reward_store.RoundRewardFnStore
+          num_stages: ${training.max_stage}
+          reward_fns:
+            - *target*: rgym_exp.src.rewards.RGRewards
+            
+  trainer:
+    *target*: rgym_exp.src.trainer.GRPOTrainerModule
+    models:
+      - *target*: transformers.AutoModelForCausalLM.from_pretrained
+        pretrained_model_name_or_path: "Gensyn/Qwen2.5-1.5B-Instruct"  # Cố định model
+        torch_dtype: float16  # Sử dụng fp16 cho model
+        device_map: "auto"    # Tự động phân bổ GPU memory
+        low_cpu_mem_usage: true  # Tiết kiệm CPU RAM
+    config:
+      *target*: trl.trainer.GRPOConfig
+      logging_dir: ${log_dir}
+      fp16: ${training.fp16}
+      per_device_train_batch_size: 1      # Batch size nhỏ cho 10 nodes
+      per_device_eval_batch_size: 1
+      gradient_accumulation_steps: 2      # Tăng để maintain effective batch size
+      dataloader_num_workers: 2           # Giới hạn workers để tiết kiệm CPU
+      logging_steps: 50                   # Giảm tần suất logging
+      save_steps: 1000                    # Giảm tần suất save
+      eval_steps: 500                     # Giảm tần suất eval
+      max_length: 1024                    # Giới hạn sequence length
+      max_new_tokens: 256                 # Giới hạn generation length
+    log_with: wandb
+    log_dir: ${log_dir}
+    epsilon: 0.2
+    epsilon_high: 0.28
+    num_generations: ${training.num_generations}
+    judge_base_url: ${eval.judge_base_url}
+    
+  data_manager:
+    *target*: rgym_exp.src.data.ReasoningGymDataManager
+    yaml_config_path: "rgym_exp/src/datasets.yaml"
+    num_train_samples: 1                # Giảm từ 2 để tiết kiệm tài nguyên
+    num_evaluation_samples: 0
+    num_generations: ${training.num_generations}
+    system_prompt_id: 'default'
+    seed: ${training.seed}
+    num_transplant_trees: ${training.num_transplant_trees}
+    
+  communication:
+    *target*: genrl.communication.hivemind.hivemind_backend.HivemindBackend
+    initial_peers: ${communications.initial_peers}
+    identity_path: ${oc.env:IDENTITY_PATH,null}
+    startup_timeout: 180                # Tăng timeout cho nhiều nodes
+    beam_size: 20                       # Giảm từ 50 để tiết kiệm bandwidth
+    averaging_timeout: 30.0             # Timeout cho model averaging
+    compression: true                   # Bật compression để tiết kiệm bandwidth
+    
+  coordinator:
+    *target*: genrl.blockchain.coordinator.ModalSwarmCoordinator
+    web3_url: ${blockchain.alchemy_url}
+    contract_address: ${blockchain.contract_address}
+    org_id: ${blockchain.org_id}
+    modal_proxy_url: ${blockchain.modal_proxy_url}
+
+# Cấu hình tối ưu cho H100
+gpu_config:
+  memory_fraction: 0.08               # Mỗi node sử dụng ~8% GPU memory (80GB/10 = 8GB)
+  allow_growth: true                  # Cho phép tăng memory động
+  
+# Pool models đã được tối ưu
+default_large_model_pool: 
+  - "Gensyn/Qwen2.5-1.5B-Instruct"   # Chỉ sử dụng model này
+  
+default_small_model_pool:
+  - "Gensyn/Qwen2.5-1.5B-Instruct"   # Đồng nhất để tránh phức tạp
+
+# Cấu hình resource limits cho 10 nodes
+resource_limits:
+  cpu_per_node: 2                     # 20 vCPU / 10 nodes = 2 vCPU/node
+  memory_per_node: "24GB"             # 240GB RAM / 10 nodes = 24GB/node
+  gpu_memory_per_node: "8GB"          # 80GB VRAM / 10 nodes = 8GB/node
