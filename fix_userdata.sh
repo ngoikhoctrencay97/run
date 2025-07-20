@@ -183,40 +183,41 @@ update_scripts_for_nested_json() {
         
         # Update ORG_ID extraction
         sed -i '/# Extract ORG_ID/,/^" 2>\/dev\/null)$/c\
-# Extract ORG_ID\
-ORG_ID=$(python -c "\
-import json\
-try:\
-    with open('\''modal-login/temp-data/userData.json'\'', '\''r'\'') as f:\
-        data = json.load(f)\
-    # Try flat structure first\
-    if '\''orgId'\'' in data:\
-        print(data['\''orgId'\''])\
-    else:\
-        # Try nested structure\
-        for key, value in data.items():\
-            if isinstance(value, dict) and '\''orgId'\'' in value:\
-                print(value['\''orgId'\''])\
-                break\
-            elif isinstance(value, dict):\
-                # The key itself might be the orgId\
-                print(key)\
-                break\
-except:\
-    print(\'\'\'\')\
-" 2>/dev/null)' launch_node_venv.sh
-        
-        log_info "✅ Updated launch_node_venv.sh"
-    fi
-    
-    # Update separate_nodes_setup.sh if exists
-    if [[ -f "separate_nodes_setup.sh" ]]; then
-        # Similar update for the main setup script
-        log_info "✅ Updated separate_nodes_setup.sh"
-    fi
-    
-    log_info "✅ Scripts updated to handle nested JSON"
-}
+# Extract ORG_ID
+ORG_ID=$(python -c "
+import json
+try:
+    with open('modal-login/temp-data/userData.json', 'r') as f:
+        data = json.load(f)
+    # Try flat structure first
+    if 'orgId' in data:
+        print(data['orgId'])
+    else:
+        # Try nested structure
+        for key, value in data.items():
+            if isinstance(value, dict) and 'orgId' in value:
+                print(value['orgId'])
+                break
+            elif isinstance(value, dict):
+                # The key itself might be the orgId
+                print(key)
+                break
+except:
+    print('')
+" 2>/dev/null)
+
+# Run the launch_node_venv.sh script with the extracted ORG_ID
+./launch_node_venv.sh
+
+log_info "✅ Updated launch_node_venv.sh"
+
+# Update separate_nodes_setup.sh if exists
+if [[ -f "separate_nodes_setup.sh" ]]; then
+    # Similar update for the main setup script
+    log_info "✅ Updated separate_nodes_setup.sh"
+fi
+
+log_info "✅ Scripts updated to handle nested JSON"
 
 # Test orgId extraction
 test_orgid_extraction() {
