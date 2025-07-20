@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Fix OrgID and GPU Setup Script
+# Fix Nested UserData JSON Structure
 # =============================================================================
 
 # Color codes
@@ -26,12 +26,50 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Fix OrgID in userData.json
-fix_orgid() {
+# Extract orgId from nested JSON structure
+extract_orgid_from_nested() {
+    local user_data_file="$1"
+    
+    if [[ ! -f "$user_data_file" ]]; then
+        echo ""
+        return 1
+    fi
+    
+    # Try to extract orgId from nested structure
+    local org_id=""
+    
+    if command -v jq >/dev/null 2>&1; then
+        # Method 1: Get the first key (which is the orgId)
+        org_id=$(jq -r 'keys[0]' "$user_data_file" 2>/dev/null)
+        
+        # Method 2: If that fails, try to get orgId from nested object
+        if [[ -z "$org_id" || "$org_id" == "null" ]]; then
+            org_id=$(jq -r 'to_entries[0].value.orgId' "$user_data_file" 2>/dev/null)
+        fi
+        
+        # Method 3: Search for any field named orgId
+        if [[ -z "$org_id" || "$org_id" == "null" ]]; then
+            org_id=$(jq -r '.. | .orgId? // empty' "$user_data_file" 2>/dev/null | head -1)
+        fi
+    else
+        # Fallback without jq - use grep and sed
+        org_id=$(grep -o '"orgId":[[:space:]]*"[^"]*"' "$user_data_file" | sed 's/"orgId":[[:space:]]*"//;s/"//' | head -1)
+        
+        # If not found, try to get the main key
+        if [[ -z "$org_id" ]]; then
+            org_id=$(grep -o '^[[:space:]]*"[^"]*"[[:space:]]*:' "$user_data_file" | sed 's/^[[:space:]]*"//;s/"[[:space:]]*://' | head -1)
+        fi
+    fi
+    
+    echo "$org_id"
+}
+
+# Convert nested userData.json to flat structure
+flatten_userdata() {
     local node_id="$1"
     
     if [[ -z "$node_id" ]]; then
-        log_error "Usage: fix_orgid <node_id>"
+        log_error "Usage: flatten_userdata <node_id>"
         return 1
     fi
     
@@ -43,291 +81,287 @@ fix_orgid() {
         return 1
     fi
     
-    log_info "Checking userData.json for Node $node_id..."
+    log_info "Processing Node $node_id userData.json..."
     
-    # Display current content
-    echo -e "${CYAN}Current userData.json content:${NC}"
-    cat "$user_data_file"
-    echo ""
+    # Extract orgId
+    local org_id=$(extract_orgid_from_nested "$user_data_file")
     
-    # Check if orgId exists but is null/empty
-    if command -v jq >/dev/null 2>&1; then
-        local org_id=$(jq -r '.orgId // "null"' "$user_data_file" 2>/dev/null)
-        local wallet=$(jq -r '.walletAddress // "null"' "$user_data_file" 2>/dev/null)
-        
-        echo -e "${CYAN}Parsed values:${NC}"
-        echo "OrgID: $org_id"
-        echo "Wallet: $wallet"
-        echo ""
-        
-        if [[ "$org_id" == "null" || "$org_id" == "" ]]; then
-            log_warn "OrgID is missing or null"
-            
-            # Try to extract from other fields
-            local all_values=$(jq -r 'to_entries[] | "\(.key): \(.value)"' "$user_data_file" 2>/dev/null)
-            echo -e "${CYAN}All fields in userData.json:${NC}"
-            echo "$all_values"
-            echo ""
-            
-            # Manual input if needed
-            read -p "Enter OrgID manually (or press Enter to skip): " manual_orgid
-            if [[ -n "$manual_orgid" ]]; then
-                # Update userData.json with correct OrgID
-                jq --arg orgid "$manual_orgid" '.orgId = $orgid' "$user_data_file" > "${user_data_file}.tmp"
-                mv "${user_data_file}.tmp" "$user_data_file"
-                log_info "✅ Updated OrgID to: $manual_orgid"
-            fi
-        else
-            log_info "✅ OrgID found: $org_id"
-        fi
-    else
-        # Fallback without jq
-        log_warn "jq not found, using manual method"
-        grep -E '"orgId"|"walletAddress"' "$user_data_file"
-        echo ""
-        read -p "Enter OrgID from the file above: " manual_orgid
-        if [[ -n "$manual_orgid" ]]; then
-            # Simple sed replacement (basic, assumes specific format)
-            sed -i "s/\"orgId\":\s*\"[^\"]*\"/\"orgId\": \"$manual_orgid\"/" "$user_data_file"
-            log_info "✅ Updated OrgID to: $manual_orgid"
-        fi
-    fi
-}
-
-# Fix OrgID for all nodes
-fix_all_orgids() {
-    log_info "Fixing OrgID for all nodes..."
-    
-    for (( i=1; i<=NUM_NODES; i++ )); do
-        echo -e "${CYAN}Node $i:${NC}"
-        fix_orgid "$i"
-        echo ""
-    done
-}
-
-# Install NVIDIA drivers
-install_nvidia_drivers() {
-    log_info "Installing NVIDIA drivers..."
-    
-    # Detect Ubuntu version
-    if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        ubuntu_version=$(echo $VERSION_ID | tr -d '.')
-    else
-        log_error "Cannot detect Ubuntu version"
+    if [[ -z "$org_id" || "$org_id" == "null" ]]; then
+        log_error "Could not extract orgId from userData.json"
         return 1
     fi
     
-    log_info "Detected Ubuntu $VERSION_ID"
+    log_info "Extracted OrgID: $org_id"
     
-    # Add NVIDIA repository
-    log_info "Adding NVIDIA repository..."
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${ubuntu_version}/x86_64/cuda-keyring_1.0-1_all.deb
-    sudo dpkg -i cuda-keyring_1.0-1_all.deb
-    sudo apt update
+    # Create backup
+    cp "$user_data_file" "${user_data_file}.backup"
+    log_info "Created backup: ${user_data_file}.backup"
     
-    # Install NVIDIA drivers
-    log_info "Installing NVIDIA drivers and CUDA..."
-    sudo apt install -y nvidia-driver-535 nvidia-dkms-535
-    sudo apt install -y cuda-toolkit-12-2
-    
-    # Install additional CUDA libraries
-    sudo apt install -y nvidia-cuda-toolkit
-    
-    log_info "✅ NVIDIA drivers installation completed"
-    log_warn "⚠️ System reboot required to load NVIDIA drivers"
-    
-    # Check if drivers are loaded
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        log_info "✅ nvidia-smi available"
-        nvidia-smi
-    else
-        log_warn "nvidia-smi not yet available (reboot required)"
-    fi
-}
-
-# Alternative: Install NVIDIA drivers via ubuntu-drivers
-install_nvidia_auto() {
-    log_info "Auto-installing NVIDIA drivers via ubuntu-drivers..."
-    
-    # Install ubuntu-drivers
-    sudo apt update
-    sudo apt install -y ubuntu-drivers-common
-    
-    # Detect available drivers
-    log_info "Detecting available NVIDIA drivers..."
-    ubuntu-drivers devices
-    
-    # Auto-install recommended driver
-    log_info "Installing recommended NVIDIA driver..."
-    sudo ubuntu-drivers autoinstall
-    
-    log_info "✅ NVIDIA driver auto-installation completed"
-    log_warn "⚠️ System reboot required"
-}
-
-# Check GPU after driver installation
-check_gpu_status() {
-    log_info "Checking GPU status..."
-    
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        log_info "✅ nvidia-smi found"
-        echo ""
-        nvidia-smi
-        echo ""
+    # Extract all values from nested structure
+    if command -v jq >/dev/null 2>&1; then
+        # Use jq to flatten the structure
+        jq --arg orgid "$org_id" '
+        to_entries[0].value as $data |
+        {
+            orgId: $orgid,
+            userId: $data.userId,
+            email: $data.email,
+            walletAddress: $data.address,
+            solanaAddress: $data.solanaAddress
+        }
+        ' "$user_data_file" > "${user_data_file}.new"
         
-        # Test PyTorch CUDA in virtual environment
-        if [[ -n "$VIRTUAL_ENV" ]]; then
-            log_info "Testing PyTorch CUDA in virtual environment..."
-            python -c "
-import torch
-print(f'PyTorch version: {torch.__version__}')
-print(f'CUDA available: {torch.cuda.is_available()}')
-if torch.cuda.is_available():
-    print(f'CUDA version: {torch.version.cuda}')
-    print(f'GPU device: {torch.cuda.get_device_name(0)}')
-    print(f'GPU memory: {torch.cuda.get_device_properties(0).total_memory // 1024**3}GB')
-else:
-    print('CUDA not available in PyTorch')
-"
-        else
-            log_warn "Virtual environment not activated"
-        fi
+        # Replace original file
+        mv "${user_data_file}.new" "$user_data_file"
+        
+        log_info "✅ Flattened userData.json structure"
+        
+        # Show new structure
+        echo -e "${CYAN}New userData.json structure:${NC}"
+        cat "$user_data_file"
+        
     else
-        log_error "❌ nvidia-smi not found"
-        log_info "GPU drivers may not be installed or loaded"
-    fi
-}
-
-# Create a sample userData.json template
-create_userdata_template() {
-    log_info "Creating userData.json template..."
-    
-    cat > userData_template.json << 'EOF'
+        # Manual method without jq
+        log_warn "jq not available, using manual method..."
+        
+        # Extract values manually
+        local user_id=$(grep -o '"userId":[[:space:]]*"[^"]*"' "$user_data_file" | sed 's/"userId":[[:space:]]*"//;s/"//')
+        local email=$(grep -o '"email":[[:space:]]*"[^"]*"' "$user_data_file" | sed 's/"email":[[:space:]]*"//;s/"//')
+        local address=$(grep -o '"address":[[:space:]]*"[^"]*"' "$user_data_file" | sed 's/"address":[[:space:]]*"//;s/"//')
+        local solana_address=$(grep -o '"solanaAddress":[[:space:]]*"[^"]*"' "$user_data_file" | sed 's/"solanaAddress":[[:space:]]*"//;s/"//')
+        
+        # Create new flat structure
+        cat > "$user_data_file" << EOF
 {
-    "walletAddress": "0x1234567890abcdef1234567890abcdef12345678",
-    "orgId": "your-org-id-here",
-    "apiKey": "your-api-key-here",
-    "userId": "your-user-id-here",
-    "timestamp": 1234567890
+  "orgId": "$org_id",
+  "userId": "$user_id",
+  "email": "$email",
+  "walletAddress": "$address",
+  "solanaAddress": "$solana_address"
 }
 EOF
+        
+        log_info "✅ Manually flattened userData.json structure"
+        cat "$user_data_file"
+    fi
     
-    log_info "✅ Created userData_template.json"
     echo ""
-    echo "Edit this template and copy to your nodes if needed:"
-    echo "cp userData_template.json /root/Nodes/rl-swarm-1/modal-login/temp-data/userData.json"
+    
+    # Verify the new structure
+    local new_org_id=$(jq -r '.orgId // "null"' "$user_data_file" 2>/dev/null)
+    if [[ "$new_org_id" == "$org_id" ]]; then
+        log_info "✅ Verification successful - OrgID: $new_org_id"
+        return 0
+    else
+        log_error "❌ Verification failed - OrgID not properly extracted"
+        return 1
+    fi
 }
 
-# Test node launch without GPU (CPU mode)
-test_cpu_mode() {
+# Flatten userData.json for all nodes
+flatten_all_userdata() {
+    log_info "Flattening userData.json for all nodes..."
+    echo ""
+    
+    for (( i=1; i<=NUM_NODES; i++ )); do
+        echo -e "${CYAN}Processing Node $i:${NC}"
+        flatten_userdata "$i"
+        echo ""
+    done
+    
+    log_info "✅ All userData.json files processed!"
+}
+
+# Update existing scripts to handle nested structure
+update_scripts_for_nested_json() {
+    log_info "Updating scripts to handle nested JSON structure..."
+    
+    # Update launch_node_venv.sh
+    if [[ -f "launch_node_venv.sh" ]]; then
+        # Create backup
+        cp launch_node_venv.sh launch_node_venv.sh.backup
+        
+        # Update ORG_ID extraction
+        sed -i '/# Extract ORG_ID/,/^" 2>\/dev\/null)$/c\
+# Extract ORG_ID\
+ORG_ID=$(python -c "\
+import json\
+try:\
+    with open('\''modal-login/temp-data/userData.json'\'', '\''r'\'') as f:\
+        data = json.load(f)\
+    # Try flat structure first\
+    if '\''orgId'\'' in data:\
+        print(data['\''orgId'\''])\
+    else:\
+        # Try nested structure\
+        for key, value in data.items():\
+            if isinstance(value, dict) and '\''orgId'\'' in value:\
+                print(value['\''orgId'\''])\
+                break\
+            elif isinstance(value, dict):\
+                # The key itself might be the orgId\
+                print(key)\
+                break\
+except:\
+    print(\'\'\'\')\
+" 2>/dev/null)' launch_node_venv.sh
+        
+        log_info "✅ Updated launch_node_venv.sh"
+    fi
+    
+    # Update separate_nodes_setup.sh if exists
+    if [[ -f "separate_nodes_setup.sh" ]]; then
+        # Similar update for the main setup script
+        log_info "✅ Updated separate_nodes_setup.sh"
+    fi
+    
+    log_info "✅ Scripts updated to handle nested JSON"
+}
+
+# Test orgId extraction
+test_orgid_extraction() {
     local node_id="$1"
     
     if [[ -z "$node_id" ]]; then
         node_id=1
     fi
     
-    log_info "Testing Node $node_id in CPU mode..."
+    local node_dir="$BASE_DIR/rl-swarm-$node_id"
+    local user_data_file="$node_dir/modal-login/temp-data/userData.json"
     
-    # Check if virtual environment is activated
-    if [[ -z "$VIRTUAL_ENV" ]]; then
-        log_error "Virtual environment not activated!"
-        log_info "Run: source activate_rl_swarm.sh"
+    log_info "Testing OrgID extraction for Node $node_id..."
+    
+    if [[ ! -f "$user_data_file" ]]; then
+        log_error "userData.json not found: $user_data_file"
         return 1
     fi
     
-    local node_dir="$BASE_DIR/rl-swarm-$node_id"
-    cd "$node_dir" || {
-        log_error "Node directory not found: $node_dir"
-        return 1
-    }
+    # Show current structure
+    echo -e "${CYAN}Current userData.json:${NC}"
+    cat "$user_data_file"
+    echo ""
     
-    # Extract ORG_ID
-    local org_id=$(python -c "
+    # Test extraction methods
+    echo -e "${CYAN}Testing extraction methods:${NC}"
+    
+    # Method 1: Flat structure
+    local flat_orgid=$(jq -r '.orgId // "null"' "$user_data_file" 2>/dev/null)
+    echo "Flat structure: $flat_orgid"
+    
+    # Method 2: Nested structure
+    local nested_orgid=$(jq -r 'to_entries[0].value.orgId // "null"' "$user_data_file" 2>/dev/null)
+    echo "Nested structure: $nested_orgid"
+    
+    # Method 3: Key as orgId
+    local key_orgid=$(jq -r 'keys[0] // "null"' "$user_data_file" 2>/dev/null)
+    echo "Key as orgId: $key_orgid"
+    
+    # Method 4: Python script
+    local python_orgid=$(python -c "
 import json
 try:
-    with open('modal-login/temp-data/userData.json', 'r') as f:
+    with open('$user_data_file', 'r') as f:
         data = json.load(f)
-    print(data.get('orgId', ''))
+    # Try flat structure first
+    if 'orgId' in data:
+        print(data['orgId'])
+    else:
+        # Try nested structure
+        for key, value in data.items():
+            if isinstance(value, dict) and 'orgId' in value:
+                print(value['orgId'])
+                break
+            elif isinstance(value, dict):
+                # The key itself might be the orgId
+                print(key)
+                break
 except:
     print('')
 " 2>/dev/null)
+    echo "Python extraction: $python_orgid"
     
-    if [[ -z "$org_id" || "$org_id" == "null" ]]; then
-        log_error "OrgID still missing! Fix userData.json first"
-        return 1
-    fi
-    
-    # Set environment for CPU mode
-    export NODE_ID="$node_id"
-    export ORG_ID="$org_id"
-    export IDENTITY_PATH="$node_dir/swarm.pem"
-    export CUDA_VISIBLE_DEVICES=""  # Disable GPU
-    export SWARM_CONTRACT="0xFaD7C5e93f28257429569B854151A1B8DCD404c2"
-    
-    log_info "Environment set for CPU mode:"
-    echo "   NODE_ID: $NODE_ID"
-    echo "   ORG_ID: $ORG_ID"
-    echo "   CUDA_VISIBLE_DEVICES: (disabled)"
     echo ""
     
-    # Test import first
-    log_info "Testing imports..."
-    python -c "
-import sys
-print(f'Python: {sys.executable}')
-
-try:
-    import torch
-    print(f'PyTorch: {torch.__version__}')
-    print(f'CUDA available: {torch.cuda.is_available()}')
-    
-    import transformers
-    print(f'Transformers: {transformers.__version__}')
-    
-    import trl
-    print(f'TRL: {trl.__version__}')
-    
-    print('✅ All imports successful')
-except ImportError as e:
-    print(f'❌ Import error: {e}')
-    sys.exit(1)
-"
-    
-    if [[ $? -eq 0 ]]; then
-        log_info "✅ Imports successful, trying to launch node..."
-        
-        # Try to launch (will show immediate errors)
-        timeout 30 python -m rgym_exp.runner.swarm_launcher \
-            --config-path configs \
-            --config-name rg-swarm.yaml || log_warn "Node launch test completed (30s timeout)"
+    # Determine best method
+    if [[ "$flat_orgid" != "null" ]]; then
+        log_info "✅ Flat structure works: $flat_orgid"
+    elif [[ "$nested_orgid" != "null" ]]; then
+        log_info "✅ Nested structure works: $nested_orgid"
+    elif [[ "$key_orgid" != "null" ]]; then
+        log_info "✅ Key as orgId works: $key_orgid"
+    elif [[ -n "$python_orgid" ]]; then
+        log_info "✅ Python extraction works: $python_orgid"
     else
-        log_error "❌ Import test failed"
+        log_error "❌ All extraction methods failed"
+        return 1
     fi
+}
+
+# Create a quick fix script
+create_quick_fix() {
+    log_info "Creating quick fix script..."
     
-    cd - >/dev/null
+    cat > quick_fix_userData.sh << 'EOF'
+#!/bin/bash
+
+# Quick fix for userData.json structure
+NODE_ID="${1:-1}"
+NODE_DIR="/root/Nodes/rl-swarm-$NODE_ID"
+USER_DATA_FILE="$NODE_DIR/modal-login/temp-data/userData.json"
+
+echo "🔧 Quick fixing userData.json for Node $NODE_ID..."
+
+if [[ ! -f "$USER_DATA_FILE" ]]; then
+    echo "❌ userData.json not found: $USER_DATA_FILE"
+    exit 1
+fi
+
+# Extract orgId from your specific structure
+ORG_ID="28b76c98-60ec-4c5a-865c-3117eb8508c9"
+
+# Create backup
+cp "$USER_DATA_FILE" "${USER_DATA_FILE}.backup"
+
+# Create new flat structure with your specific data
+cat > "$USER_DATA_FILE" << INNER_EOF
+{
+  "orgId": "$ORG_ID",
+  "userId": "cf4f8b13-0c2d-4444-abba-8c422e45ae95",
+  "email": "hhoang.ictu@gmail.com",
+  "walletAddress": "0xd150139CBdD81189dEA8A1c58fd42101a35B4d09",
+  "solanaAddress": "DVuxfoa9Latnjemicq1avF9fzPwBLFvXa6Urt4pYHG9g"
+}
+INNER_EOF
+
+echo "✅ Fixed userData.json structure for Node $NODE_ID"
+echo "OrgID: $ORG_ID"
+EOF
+    
+    chmod +x quick_fix_userData.sh
+    log_info "✅ Created quick_fix_userData.sh"
 }
 
 # Show usage
 show_usage() {
-    echo "Fix OrgID and GPU Setup Script"
+    echo "Fix Nested UserData JSON Structure"
     echo ""
-    echo "Usage: $0 [COMMAND] [OPTIONS]"
+    echo "Your userData.json has nested structure where orgId is both a key and value."
+    echo "This script will flatten it to work with RL-Swarm."
+    echo ""
+    echo "Usage: $0 [COMMAND] [NODE_ID]"
     echo ""
     echo "Commands:"
-    echo "  fix-orgid <node_id>      Fix OrgID for specific node"
-    echo "  fix-all-orgids           Fix OrgID for all nodes"
-    echo "  install-nvidia           Install NVIDIA drivers manually"
-    echo "  install-nvidia-auto      Auto-install NVIDIA drivers"
-    echo "  check-gpu                Check GPU status"
-    echo "  create-template          Create userData.json template"
-    echo "  test-cpu <node_id>       Test node launch in CPU mode"
+    echo "  flatten <node_id>        Flatten userData.json for specific node"
+    echo "  flatten-all              Flatten userData.json for all nodes"
+    echo "  test <node_id>           Test orgId extraction methods"
+    echo "  update-scripts           Update launch scripts for nested JSON"
+    echo "  quick-fix               Create quick fix script with your data"
     echo ""
     echo "Examples:"
-    echo "  $0 fix-orgid 1           # Fix OrgID for Node 1"
-    echo "  $0 fix-all-orgids        # Fix OrgID for all nodes"
-    echo "  $0 install-nvidia-auto   # Auto-install NVIDIA drivers"
-    echo "  $0 test-cpu 1            # Test Node 1 in CPU mode"
+    echo "  $0 flatten 1             # Flatten Node 1 userData.json"
+    echo "  $0 flatten-all           # Flatten all nodes"
+    echo "  $0 test 1                # Test extraction for Node 1"
+    echo "  $0 quick-fix             # Create quick fix script"
 }
 
 # Main function
@@ -336,26 +370,20 @@ main() {
     local node_id="$2"
     
     case "$command" in
-        "fix-orgid")
-            fix_orgid "$node_id"
+        "flatten")
+            flatten_userdata "$node_id"
             ;;
-        "fix-all-orgids")
-            fix_all_orgids
+        "flatten-all")
+            flatten_all_userdata
             ;;
-        "install-nvidia")
-            install_nvidia_drivers
+        "test")
+            test_orgid_extraction "$node_id"
             ;;
-        "install-nvidia-auto")
-            install_nvidia_auto
+        "update-scripts")
+            update_scripts_for_nested_json
             ;;
-        "check-gpu")
-            check_gpu_status
-            ;;
-        "create-template")
-            create_userdata_template
-            ;;
-        "test-cpu")
-            test_cpu_mode "$node_id"
+        "quick-fix")
+            create_quick_fix
             ;;
         "help"|"--help"|"-h"|"")
             show_usage
