@@ -22,7 +22,7 @@ fi
 SCRIPT
 
 chmod +x /home/ubuntu/tmux_monitor.sh
-echo '*/5 * * * * root /home/ubuntu/tmux_monitor.sh' >> /etc/crontab
+echo '*/5 * * * * root cd /home/ubuntu && /home/ubuntu/tmux_monitor.sh' | sudo tee -a /etc/crontab
 systemctl restart cron
 echo "Setup complete"
 EOF
