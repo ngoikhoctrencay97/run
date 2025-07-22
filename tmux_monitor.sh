@@ -20,7 +20,7 @@ fi
 SCRIPT
 
 chmod +x /home/ubuntu/tmux_monitor.sh
-echo '*/5 * * * * /home/ubuntu/tmux_monitor.sh' | crontab -
+echo "*/5 * * * * $PWD/tmux_monitor.sh" | crontab -
 sudo systemctl restart cron
 echo "Setup complete"
 crontab -l | grep tmux_monitor && echo "✓ Cron job added" || echo "✗ Cron job failed"
