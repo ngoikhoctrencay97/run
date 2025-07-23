@@ -22,6 +22,7 @@ trap 'rm -f "$LOCKFILE"; exit' EXIT INT TERM
 if ! /usr/bin/tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     # Dọn dẹp tiến trình cũ (chạy dưới quyền người dùng hiện tại nếu có thể)
     pkill -f "/home/ubuntu/rl-swarm" 2>/dev/null || true
+    sleep 1
     pkill -f -9 "run_rl_swarm" 2>/dev/null || true
     sleep 2
     
