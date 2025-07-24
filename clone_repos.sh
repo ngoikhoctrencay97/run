@@ -14,7 +14,7 @@ REPO_URL="https://github.com/ngoikhoctrencay97/rl-swarm.git"
 TEMP_DIR="rl-swarm-temp"
 
 # Number of directories to create (can be changed, e.g.: 5 or 10)
-NUM_INSTANCES=5
+NUM_INSTANCES=10
 
 # Port increment step for each instance
 INCREMENT_STEP=100
@@ -77,7 +77,7 @@ for ((i=1; i<=NUM_INSTANCES; i++)); do
     RUN_SCRIPT="$INSTANCE/run_rl_swarm.sh"
     PACKAGE_JSON="$INSTANCE/modal-login/package.json"
     ENV_FILE="$INSTANCE/.env"
-    CONFIG_YAML="$INSTANCE/rgym_exp/config/config.yaml"
+    CONFIG_YAML="$INSTANCE/rgym_exp/config/rg-swarm.yaml"
     COORDINATOR_PY="$INSTANCE/.venv/lib/python3.12/site-packages/genrl/blockchain/coordinator.py"
 
     # Update docker-compose.yaml
