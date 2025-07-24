@@ -8,16 +8,16 @@ OTEL_HTTP_PORT=4318
 OTEL_PROM_PORT=55679
 
 # Repository URL
-REPO_URL="https://github.com/ngoikhoctrencay97/rl-swarm.git"
+REPO_URL="https://github.com/arifulformen2019/rl-swarm.git"
 
 # Temporary directory to clone the original repository
 TEMP_DIR="rl-swarm-temp"
 
 # Number of directories to create (can be changed, e.g.: 5 or 10)
-NUM_INSTANCES=10
+NUM_INSTANCES=16
 
 # Port increment step for each instance
-INCREMENT_STEP=100
+INCREMENT_STEP=10
 
 # Check if git and sed are installed
 if ! command -v git &> /dev/null; then
