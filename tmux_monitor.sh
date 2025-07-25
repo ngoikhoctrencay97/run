@@ -24,7 +24,7 @@ if ! /usr/bin/tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     pkill -f "python.*rgym_exp.runner.swarm_launcher" 2>/tmp/swarm_launcher_pkill.log || true
     sleep 2
     
-    cd /home/ubuntu || exit 1
+    cd $HOME || exit 1
     sleep 1
     /usr/bin/tmux new-session -d -s "$SESSION_NAME" /bin/bash
     sleep 1
