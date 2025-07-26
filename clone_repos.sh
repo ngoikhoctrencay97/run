@@ -131,12 +131,12 @@ for ((i=0; i<NUM_INSTANCES; i++)); do
     fi
 
     # Update coordinator.py (if needed)
-    if [ -f "$COORDINATOR_PY" ]; then
-        echo "Checking and updating ports in $COORDINATOR_PY..."
-        sed -i "s/http:\/\/localhost:$BASE_PORT/http:\/\/localhost:$NEW_BASE_PORT/g" "$COORDINATOR_PY"
-    else
-        echo "Warning: $COORDINATOR_PY not found"
-    fi
+    # if [ -f "$COORDINATOR_PY" ]; then
+    #     echo "Checking and updating ports in $COORDINATOR_PY..."
+    #     sed -i "s/http:\/\/localhost:$BASE_PORT/http:\/\/localhost:$NEW_BASE_PORT/g" "$COORDINATOR_PY"
+    # else
+    #     echo "Warning: $COORDINATOR_PY not found"
+    # fi
 
     echo "New ports for $INSTANCE:"
     echo "BASE_PORT: $NEW_BASE_PORT"
@@ -147,16 +147,16 @@ for ((i=0; i<NUM_INSTANCES; i++)); do
 done
 
 # Step 4: Check API status
-for ((i=1; i<=NUM_INSTANCES; i++)); do
-    INSTANCE="rl-swarm-$i"
-    NEW_BASE_PORT=$((BASE_PORT + (i-1) * INCREMENT_STEP))
-    echo "Checking API for $INSTANCE on port $NEW_BASE_PORT..."
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$NEW_BASE_PORT/api/submit-reward"; then
-        echo "API /submit-reward on port $NEW_BASE_PORT is ready."
-    else
-        echo "Warning: API /submit-reward on port $NEW_BASE_PORT is not responding. Please run 'yarn start' in $INSTANCE/modal-login first."
-    fi
-done
+# for ((i=1; i<=NUM_INSTANCES; i++)); do
+#     INSTANCE="rl-swarm-$i"
+#     NEW_BASE_PORT=$((BASE_PORT + (i-1) * INCREMENT_STEP))
+#     echo "Checking API for $INSTANCE on port $NEW_BASE_PORT..."
+#     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$NEW_BASE_PORT/api/submit-reward"; then
+#         echo "API /submit-reward on port $NEW_BASE_PORT is ready."
+#     else
+#         echo "Warning: API /submit-reward on port $NEW_BASE_PORT is not responding. Please run 'yarn start' in $INSTANCE/modal-login first."
+#     fi
+# done
 
 echo "Complete! $NUM_INSTANCES directories have been created and ports have been updated."
 echo "To run each instance:"
